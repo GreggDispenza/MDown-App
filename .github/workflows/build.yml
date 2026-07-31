@@ -79,21 +79,29 @@ jobs:
         # fail loudly if no .exe is present, and repackage everything under a
         # single MDown/ folder so the unzipped result is obviously an app
         # folder you open and run.
+        # NOTE: GitHub runs this with `bash -eo pipefail`, so piping a huge
+        # listing into `head` makes the upstream command die with SIGPIPE
+        # (exit 141) and fails the step. We therefore redirect long output to
+        # files and never pipe into `head`.
         run: |
-          echo "==================== build/windows tree ===================="
-          ls -R build/windows | head -n 200
-          echo "==================== .exe files found ===================="
-          exe="$(find build/windows -iname '*.exe' | head -n 20)"
-          echo "$exe"
-          if [ -z "$exe" ]; then
-            echo "ERROR: no .exe produced by 'flet build windows'"; exit 1
+          echo "==================== build/windows top level ===================="
+          ls -la build/windows
+          echo "==================== .exe files under build/windows ===================="
+          find build/windows -iname '*.exe' > exes.txt 2>/dev/null || true
+          cat exes.txt
+          if [ ! -s exes.txt ]; then
+            echo "ERROR: no .exe produced by 'flet build windows'"
+            echo "-------------------- full tree (first 300 entries) --------------------"
+            find build/windows > fulltree.txt 2>/dev/null || true
+            sed -n '1,300p' fulltree.txt
+            exit 1
           fi
           mkdir -p staging/MDown
           cp -r build/windows/. staging/MDown/
-          exename="$(basename "$(echo "$exe" | head -n 1)")"
+          exename="$(basename "$(head -n 1 exes.txt)")"
           printf 'To run MDown:\r\n\r\n1. Keep every file in this folder together.\r\n2. Double-click %s (Windows may show it as just "%s" with an app icon).\r\n\r\nWindows SmartScreen may warn because the app is unsigned:\r\nclick "More info" then "Run anyway".\r\n' "$exename" "${exename%.exe}" > "staging/MDown/HOW-TO-RUN.txt"
-          echo "==================== staged MDown/ ===================="
-          find staging/MDown -maxdepth 1 -mindepth 1 | sort
+          echo "==================== staged MDown/ top level ===================="
+          ls -la staging/MDown
       - name: Zip app folder
         run: Compress-Archive -Path staging/MDown -DestinationPath mdown-windows.zip
       - uses: actions/upload-artifact@v4
