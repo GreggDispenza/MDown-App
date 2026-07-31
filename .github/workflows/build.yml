@@ -71,8 +71,31 @@ jobs:
               | grep -avF 'Running Flutter doctor' | tail -n 100
             exit 1
           }
+      - name: Stage app into a single MDown/ folder
+        shell: bash
+        # flet drops the runnable bundle (mdown.exe + DLLs + data/) loose in
+        # build/windows. Zipping that directly gives the user a pile of files
+        # with the .exe hidden among the DLLs. Instead: print the real tree,
+        # fail loudly if no .exe is present, and repackage everything under a
+        # single MDown/ folder so the unzipped result is obviously an app
+        # folder you open and run.
+        run: |
+          echo "==================== build/windows tree ===================="
+          ls -R build/windows | head -n 200
+          echo "==================== .exe files found ===================="
+          exe="$(find build/windows -iname '*.exe' | head -n 20)"
+          echo "$exe"
+          if [ -z "$exe" ]; then
+            echo "ERROR: no .exe produced by 'flet build windows'"; exit 1
+          fi
+          mkdir -p staging/MDown
+          cp -r build/windows/. staging/MDown/
+          exename="$(basename "$(echo "$exe" | head -n 1)")"
+          printf 'To run MDown:\r\n\r\n1. Keep every file in this folder together.\r\n2. Double-click %s (Windows may show it as just "%s" with an app icon).\r\n\r\nWindows SmartScreen may warn because the app is unsigned:\r\nclick "More info" then "Run anyway".\r\n' "$exename" "${exename%.exe}" > "staging/MDown/HOW-TO-RUN.txt"
+          echo "==================== staged MDown/ ===================="
+          find staging/MDown -maxdepth 1 -mindepth 1 | sort
       - name: Zip app folder
-        run: Compress-Archive -Path build/windows/* -DestinationPath mdown-windows.zip
+        run: Compress-Archive -Path staging/MDown -DestinationPath mdown-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: mdown-windows
