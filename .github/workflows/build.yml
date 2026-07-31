@@ -37,7 +37,12 @@ env:
 jobs:
   windows:
     name: Windows (.exe)
-    runs-on: windows-latest
+    # Pinned to windows-2022, NOT windows-latest: the latest image now
+    # ships Visual Studio 2026, which Flet 0.28.3's bundled Flutter 3.29.2
+    # and its CMake can't target (CMake falls back to the "Visual Studio
+    # 16 2019" generator and finds no matching VS). windows-2022 has the
+    # VS 2022 toolchain Flutter 3.29.2 is built for.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
