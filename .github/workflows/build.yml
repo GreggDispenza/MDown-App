@@ -1,8 +1,9 @@
 name: Build installables
 
-# Produces the two end-user deliverables as workflow artifacts:
-#   - mdown-windows  (zipped self-contained Windows app with mdown.exe)
-#   - mdown-android  (APK)
+# Produces the end-user deliverables as workflow artifacts:
+#   - mdown-windows            (zipped portable Windows app, run mdown_app.exe)
+#   - mdown-windows-installer  (MDown-Setup.exe: installs + shortcuts + uninstaller)
+#   - mdown-android            (APK)
 # Runs automatically on every code push (docs-only pushes are skipped),
 # on demand, and on version tags.
 
@@ -108,6 +109,33 @@ jobs:
         with:
           name: mdown-windows
           path: mdown-windows.zip
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        # Wrap the staged MDown/ folder into a single MDown-Setup.exe.
+        # Inno Setup 6 is preinstalled on GitHub windows runners; fall back
+        # to choco if the image ever drops it. AppSrc is passed as an
+        # absolute path so ISCC resolves [Files] Source correctly.
+        run: |
+          $iscc = Get-ChildItem -Path `
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe", `
+            "C:\Program Files\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) {
+            Write-Host "Inno Setup not found; installing via choco..."
+            choco install innosetup --no-progress -y
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          Write-Host "Using ISCC: $iscc"
+          $src = (Resolve-Path "staging/MDown").Path
+          New-Item -ItemType Directory -Force -Path installer | Out-Null
+          & "$iscc" "/DAppSrc=$src" "/O$((Resolve-Path 'installer').Path)" "packaging\windows\mdown.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          Get-ChildItem installer
+          if (-not (Test-Path "installer/MDown-Setup.exe")) { throw "MDown-Setup.exe was not produced" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdown-windows-installer
+          path: installer/MDown-Setup.exe
 
   android:
     name: Android (.apk)
