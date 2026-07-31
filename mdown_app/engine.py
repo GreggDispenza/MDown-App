@@ -15,6 +15,7 @@ import importlib.util
 import sys
 import time
 import traceback
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -135,6 +136,7 @@ class Engine:
     def convert(self, path: str) -> ConversionResult:
         started = time.monotonic()
         try:
+            _guard_archive_bomb(path)
             result = self._md.convert(path)
             return ConversionResult(
                 source=path,
@@ -167,8 +169,79 @@ class Engine:
         return exts
 
 
+# Every format MarkItDown handles by treating the file as a zip container.
+# These are the inputs a decompression bomb can hide in.
+_ZIP_BASED_EXTENSIONS = frozenset(
+    {".zip", ".docx", ".xlsx", ".pptx", ".epub"}
+)
+
+# Bomb-guard limits. Generous enough for real documents (a large slide deck
+# with images unpacks to tens of MB), tight enough to stop a phone-killing
+# expansion. Cumulative uncompressed bytes and per-member ratio both matter:
+# a bomb is small on disk but enormous unpacked.
+_MAX_TOTAL_UNCOMPRESSED = 300 * 1024 * 1024  # 300 MB across all members
+_MAX_COMPRESSION_RATIO = 120  # uncompressed/compressed, per member
+_MAX_NESTED_ARCHIVE_DEPTH = 1  # a zip inside a zip is fine; deeper is not
+
+
+class ArchiveBombError(Exception):
+    """Raised when an archive's declared expansion looks like a bomb."""
+
+
+def _guard_archive_bomb(path: str, _depth: int = 0) -> None:
+    """Reject archives whose central directory declares an implausible
+    expansion, before MarkItDown decompresses anything into memory.
+
+    Reads only the zip central directory (member metadata), never the
+    compressed data, so the check itself is cheap and bomb-proof.
+    """
+    if Path(path).suffix.lower() not in _ZIP_BASED_EXTENSIONS:
+        return
+    if not zipfile.is_zipfile(path):
+        return  # not actually a zip; let MarkItDown handle/reject it
+    with zipfile.ZipFile(path) as zf:
+        _guard_zipinfos(zf.infolist(), zf, _depth)
+
+
+def _guard_zipinfos(infos, zf: zipfile.ZipFile, depth: int) -> None:
+    total = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        total += info.file_size
+        if total > _MAX_TOTAL_UNCOMPRESSED:
+            raise ArchiveBombError(
+                f"archive expands to over {_MAX_TOTAL_UNCOMPRESSED // (1024 * 1024)} MB"
+            )
+        if info.compress_size > 0:
+            ratio = info.file_size / info.compress_size
+            if ratio > _MAX_COMPRESSION_RATIO and info.file_size > 1024 * 1024:
+                raise ArchiveBombError(
+                    f"member '{info.filename}' has a {ratio:.0f}:1 "
+                    "compression ratio"
+                )
+        if info.filename.lower().endswith(tuple(_ZIP_BASED_EXTENSIONS)):
+            if depth + 1 > _MAX_NESTED_ARCHIVE_DEPTH:
+                raise ArchiveBombError("archive nests too deeply")
+            # Inspect the nested archive's own central directory in memory.
+            try:
+                import io
+
+                nested = io.BytesIO(zf.read(info))
+            except Exception:
+                continue
+            if zipfile.is_zipfile(nested):
+                with zipfile.ZipFile(nested) as nzf:
+                    _guard_zipinfos(nzf.infolist(), nzf, depth + 1)
+
+
 def _friendly_error(exc: Exception) -> str:
     """Collapse markitdown's exception chains into one readable message."""
+    if isinstance(exc, ArchiveBombError):
+        return (
+            "This file was blocked for safety: it looks like a "
+            f"decompression bomb ({exc}). It wasn't converted."
+        )
     text = str(exc).strip()
     if "UnsupportedFormatException" in type(exc).__name__ or "not supported" in text:
         return (

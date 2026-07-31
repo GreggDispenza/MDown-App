@@ -16,6 +16,11 @@ on:
       - "**.md"
       - "LICENSE"
 
+# Least privilege: these jobs only read the repo and upload artifacts
+# (artifacts use a separate scope, not GITHUB_TOKEN contents).
+permissions:
+  contents: read
+
 # A newer push supersedes any still-running build of the same branch.
 concurrency:
   group: build-${{ github.ref }}

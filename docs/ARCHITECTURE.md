@@ -53,6 +53,24 @@ flet.** The engine is plain Python, which is why the test suite runs
 headless and why the same engine could later back a CLI or a share-sheet
 target unchanged.
 
+### Untrusted-input hardening
+
+The document a user converts is untrusted (it may have arrived by email or
+from the web). The main risk is a **decompression bomb**: zip-based formats
+(`.zip`, `.docx`, `.xlsx`, `.pptx`, `.epub`) are tiny on disk but can
+declare gigabytes of expansion, and MarkItDown decompresses members into
+memory — an out-of-memory crash, worst on a phone. `engine._guard_archive_bomb`
+runs before every conversion and inspects only the zip **central directory**
+(member metadata, never the compressed bytes, so the check itself can't be
+bombed): it rejects archives whose cumulative uncompressed size, per-member
+compression ratio, or nested-archive depth look implausible, surfacing a
+plain "blocked for safety" message instead of converting. Limits live in
+`_MAX_*` constants in `engine.py`. Other vectors reviewed and found not
+exploitable as written: save-path traversal (filenames are reduced to a
+`.stem` basename), zip-slip (MarkItDown reads members in-memory, never
+writing member paths to disk), and rendered output (Flet's `Markdown` is a
+native control, not a webview — no script execution).
+
 ## 3. Repository map
 
 ```

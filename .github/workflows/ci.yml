@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   pull_request:
 
+# Tests need no write access; a fork PR's token stays read-only.
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: tests (${{ matrix.os }}, py${{ matrix.python }})

@@ -2,8 +2,9 @@
 
 import shutil
 import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -30,7 +31,11 @@ def test_rewrite_leaves_no_remnant(tmp_path):
     # The original bug: a lazy regex stopped at the ']' inside
     # "markitdown[docx,...]" and left a dangling ']==0.1.7",' line.
     text = _rewritten(tmp_path)
-    assert "]==" not in text
+    # The bug left a dangling array-close fused to a version spec on its
+    # own line, e.g. ']==0.1.7",'. A legitimate ']==' occurs inside a
+    # dependency string like "markitdown[...]==0.1.7", so check line starts.
+    for line in text.splitlines():
+        assert not line.lstrip().startswith("]=="), "dangling remnant: " + line
     assert text.count("dependencies = [") == 1
 
 
