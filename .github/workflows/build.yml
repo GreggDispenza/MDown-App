@@ -3,12 +3,23 @@ name: Build installables
 # Produces the two end-user deliverables as workflow artifacts:
 #   - mdown-windows  (zipped self-contained Windows app with mdown.exe)
 #   - mdown-android  (APK)
-# Runs on demand, and automatically on version tags.
+# Runs automatically on every code push (docs-only pushes are skipped),
+# on demand, and on version tags.
 
 on:
   workflow_dispatch:
   push:
+    branches: ["main", "claude/**"]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+
+# A newer push supersedes any still-running build of the same branch.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   FLET_VERSION: "0.28.3"
