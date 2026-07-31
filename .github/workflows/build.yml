@@ -48,7 +48,24 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: pip install flet==${{ env.FLET_VERSION }}
-      - run: flet build windows --verbose
+      - name: Build Windows app
+        shell: bash
+        # flet wraps the build in a rich "Live" spinner that floods the log
+        # with a repeated banner and hides the real error. TERM=dumb /
+        # NO_COLOR stop the animation; on failure we also print the error
+        # tail with the two flood lines filtered out, so the true CMake /
+        # compiler message is visible.
+        env:
+          TERM: dumb
+          NO_COLOR: "1"
+        run: |
+          set -o pipefail
+          flet build windows --verbose 2>&1 | tee build.log || {
+            echo "==================== real error tail ===================="
+            grep -avF 'Error building Flet app - see the log of failed command above.' build.log \
+              | grep -avF 'Running Flutter doctor' | tail -n 100
+            exit 1
+          }
       - name: Zip app folder
         run: Compress-Archive -Path build/windows/* -DestinationPath mdown-windows.zip
       - uses: actions/upload-artifact@v4
