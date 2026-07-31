@@ -24,6 +24,10 @@ concurrency:
 env:
   FLET_VERSION: "0.28.3"
   FLUTTER_VERSION: "3.27.4"
+  # flet's CLI prints unicode spinner glyphs; Windows runners default to
+  # cp1252 and crash on them without these.
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUTF8: "1"
 
 jobs:
   windows:

@@ -44,8 +44,11 @@ def rewrite_pyproject(build_dir: Path) -> None:
     pyproject = build_dir / "pyproject.toml"
     text = pyproject.read_text()
     dep_lines = "\n".join(f'    "{d}",' for d in android_dependencies())
+    # Match through the array's closing bracket at the start of a line —
+    # a lazy `.*?\]` would stop at the `]` inside extras like
+    # "markitdown[docx,xlsx]" and corrupt the file.
     text, n = re.subn(
-        r"dependencies = \[.*?\]",
+        r"dependencies = \[.*?\n\]",
         "dependencies = [\n" + dep_lines + "\n]",
         text,
         count=1,

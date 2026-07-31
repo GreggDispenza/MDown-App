@@ -10,11 +10,14 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "MDown-App contributors" }]
+# Full converter set. On Android, if the native deps (onnxruntime via
+# magika) cannot be resolved for the target, build with
+# scripts/build_android.py instead - see docs/BUILDING.md.
+# NOTE: keep comments and apostrophes OUT of the dependencies array below;
+# flet's CLI parses this file with the legacy `toml` library, which
+# misreads quotes inside array comments ("Unbalanced quotes").
 dependencies = [
     "flet==0.28.3",
-    # Full converter set. On Android, if the native deps (onnxruntime via
-    # magika) can't be resolved for the target, build with
-    # scripts/build_android.py instead — see docs/BUILDING.md.
     "markitdown[docx,xlsx,xls,pptx,pdf,outlook]==0.1.7",
 ]
 
