@@ -1,0 +1,72 @@
+name: Build installables
+
+# Produces the two end-user deliverables as workflow artifacts:
+#   - mdown-windows  (zipped self-contained Windows app with mdown.exe)
+#   - mdown-android  (APK)
+# Runs on demand, and automatically on version tags.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  FLET_VERSION: "0.28.3"
+  FLUTTER_VERSION: "3.27.4"
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: pip install flet==${{ env.FLET_VERSION }}
+      - run: flet build windows --verbose
+      - name: Zip app folder
+        run: Compress-Archive -Path build/windows/* -DestinationPath mdown-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdown-windows
+          path: mdown-windows.zip
+
+  android:
+    name: Android (.apk)
+    runs-on: ubuntu-latest # Android SDK/NDK preinstalled on this image
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: pip install flet==${{ env.FLET_VERSION }}
+      - name: Build APK (full deps, then pure-Python fallback)
+        # Path A: default build — works if Flet's wheel index carries the
+        # native deps (onnxruntime et al.) for Android.
+        # Path B: scripts/build_android.py — pure-Python dependency set
+        # with the local magika stand-in. See docs/BUILDING.md.
+        run: |
+          flet build apk --verbose || python scripts/build_android.py --verbose
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          find build/apk dist/android -name '*.apk' -exec cp {} out/ \; 2>/dev/null || true
+          ls -l out/
+          test -n "$(ls out/*.apk 2>/dev/null)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdown-android
+          path: out/*.apk
