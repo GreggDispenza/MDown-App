@@ -1,0 +1,12 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "magika"
+version = "0.6.1"
+description = "Pure-Python drop-in stand-in for magika, for platforms without onnxruntime wheels (e.g. Android). Satisfies markitdown's 'magika~=0.6.1' requirement. NEVER publish to PyPI."
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/magika"]

@@ -1,0 +1,7 @@
+# Pure-Python dependency set for Android builds where native wheels
+# (onnxruntime, lxml, cryptography) are unavailable for the target.
+# Used by scripts/build_android.py — the magika line is replaced with an
+# absolute file:// reference to packaging/magika-stub at build time.
+flet==0.28.3
+markitdown[docx,xlsx]==0.1.7
+# magika @ file:///<repo>/packaging/magika-stub   (inserted by the script)

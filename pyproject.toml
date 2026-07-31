@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mdown-app"
+version = "0.1.0"
+description = "MDown — simple cross-platform (Windows/Android) UI for converting documents to Markdown with Microsoft MarkItDown"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "MDown-App contributors" }]
+dependencies = [
+    "flet==0.28.3",
+    # Full converter set. On Android, if the native deps (onnxruntime via
+    # magika) can't be resolved for the target, build with
+    # scripts/build_android.py instead — see docs/BUILDING.md.
+    "markitdown[docx,xlsx,xls,pptx,pdf,outlook]==0.1.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["mdown_app"]
+
+# ---- flet build configuration (flet build windows / flet build apk) ----
+[tool.flet]
+org = "app.mdown"
+project = "mdown"
+product = "MDown"
+company = "MDown-App contributors"
+copyright = "MDown-App contributors"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
