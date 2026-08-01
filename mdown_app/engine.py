@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import re
 import sys
 import time
 import traceback
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -138,9 +140,17 @@ class Engine:
         try:
             _guard_archive_bomb(path)
             result = self._md.convert(path)
+            markdown = result.markdown
+            # MarkItDown's PDF path emits flat text: no heading markup, and
+            # the page's running header/footer repeated at every page break.
+            # Tidy that up so PDF output is navigable Markdown, not a text
+            # dump. Other formats already convert to good Markdown, so we
+            # leave them untouched.
+            if Path(path).suffix.lower() == ".pdf":
+                markdown = _postprocess_pdf_markdown(markdown)
             return ConversionResult(
                 source=path,
-                markdown=result.markdown,
+                markdown=markdown,
                 title=result.title,
                 seconds=time.monotonic() - started,
             )
@@ -233,6 +243,82 @@ def _guard_zipinfos(infos, zf: zipfile.ZipFile, depth: int) -> None:
             if zipfile.is_zipfile(nested):
                 with zipfile.ZipFile(nested) as nzf:
                     _guard_zipinfos(nzf.infolist(), nzf, depth + 1)
+
+
+# ---- PDF markdown tidy-up -------------------------------------------------
+# A running header/footer is a line that repeats on most pages (e.g. a
+# confidential banner or a "Project number: ... / Version: ..." footer). We
+# detect them by how often an identical line recurs, ignoring any leading
+# page number that varies per page. Only reasonably long lines qualify, so
+# short repeated content (a "L" risk level, a "10" item number) is never
+# mistaken for boilerplate.
+_RUNNING_MARK_MIN_COUNT = 4
+_RUNNING_MARK_MIN_LEN = 12
+
+# A heading line looks like "1. Introduction", "2.1 Use of This Report" or
+# "4.1  Permits and Approvals": a dotted section number followed by a short
+# title. We require the number to carry a dot (trailing, like "5.", or
+# internal, like "1.1") so bare-numbered defect rows ("6 Water stains ...")
+# are not promoted, and we reject long, sentence-like text so numbered list
+# items ("1. All figures are estimated ...") stay as body text.
+_SECTION_RE = re.compile(r"^(\d+(?:\.\d+)*)(\.)?\s+(\S.*)$")
+_HEADING_MAX_LEN = 60
+_HEADING_MAX_WORDS = 9
+
+
+def _strip_leading_page_number(line: str) -> str:
+    return re.sub(r"^\s*\d+\s+", "", line).strip()
+
+
+def _maybe_heading(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith(("|", "#")):
+        return line  # already a table row or a heading
+    m = _SECTION_RE.match(stripped)
+    if not m:
+        return line
+    number, trailing_dot, title = m.group(1), m.group(2), m.group(3).strip()
+    if trailing_dot is None and "." not in number:
+        return line  # bare "6 Water stains ..." — a numbered row, not a heading
+    if (
+        len(title) > _HEADING_MAX_LEN
+        or len(title.split()) > _HEADING_MAX_WORDS
+        or title.endswith(".")
+    ):
+        return line  # sentence-like: a list item, not a heading
+    if re.search(r"\s\d{1,4}$", title):
+        return line  # trailing page number: a table-of-contents entry
+    depth = min(number.count(".") + 1, 4)
+    return "#" * depth + " " + stripped
+
+
+def _postprocess_pdf_markdown(md: str) -> str:
+    """Promote numbered section titles to headings and drop repeated
+    running headers/footers and standalone page numbers from PDF output."""
+    if not md.strip():
+        return md
+    lines = md.splitlines()
+    counts = Counter(
+        _strip_leading_page_number(ln) for ln in lines if ln.strip()
+    )
+    boilerplate = {
+        text
+        for text, n in counts.items()
+        if n >= _RUNNING_MARK_MIN_COUNT and len(text) >= _RUNNING_MARK_MIN_LEN
+    }
+    out: List[str] = []
+    for ln in lines:
+        stripped = ln.strip()
+        if not stripped:
+            out.append("")
+            continue
+        if _strip_leading_page_number(ln) in boilerplate:
+            continue  # running header/footer
+        if re.fullmatch(r"\d{1,4}", stripped):
+            continue  # standalone page number
+        out.append(_maybe_heading(ln))
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(out))
+    return text.strip() + "\n"
 
 
 def _friendly_error(exc: Exception) -> str:

@@ -9,7 +9,7 @@ import importlib.util
 
 import pytest
 
-from mdown_app.engine import Engine
+from mdown_app.engine import Engine, _postprocess_pdf_markdown
 
 
 @pytest.fixture(scope="module")
@@ -92,3 +92,44 @@ def test_picker_extensions_no_dots():
     exts = Engine.picker_extensions()
     assert "txt" in exts
     assert all(not e.startswith(".") for e in exts)
+
+
+# ---- PDF markdown post-processing ----------------------------------------
+
+def test_pdf_postprocess_promotes_section_headings():
+    md = "1. Introduction\n1.1 Purpose and Scope\n2. Report Qualification\n"
+    out = _postprocess_pdf_markdown(md)
+    assert "# 1. Introduction" in out
+    assert "## 1.1 Purpose and Scope" in out
+    assert "# 2. Report Qualification" in out
+
+
+def test_pdf_postprocess_strips_repeated_running_footer():
+    footer = "Project number: GHK025/341/TAH / Version: F"
+    md = "\n".join(
+        [f"{i} {footer}\nSome body text on page {i}." for i in range(1, 7)]
+    )
+    out = _postprocess_pdf_markdown(md)
+    assert footer not in out
+    assert "Some body text on page 3." in out  # content is kept
+
+
+def test_pdf_postprocess_keeps_numbered_rows_and_list_items():
+    # A bare-numbered defect row (no dot) must NOT become a heading.
+    md = "6 Water stains and cracks observed at window furnishing\n"
+    assert not _postprocess_pdf_markdown(md).lstrip().startswith("#")
+    # A long numbered sentence (list item) must NOT become a heading.
+    md2 = "1. All figures are estimated based on the preliminary visual site visits.\n"
+    assert not _postprocess_pdf_markdown(md2).lstrip().startswith("#")
+
+
+def test_pdf_postprocess_skips_toc_entries_with_page_numbers():
+    md = "4.1  Permits and Approvals, Documents Review & Compliance  10\n"
+    assert not _postprocess_pdf_markdown(md).lstrip().startswith("#")
+
+
+def test_pdf_postprocess_drops_standalone_page_numbers():
+    md = "Real content line.\n8\nMore real content.\n"
+    out = _postprocess_pdf_markdown(md)
+    assert "\n8\n" not in f"\n{out}\n"
+    assert "Real content line." in out and "More real content." in out
