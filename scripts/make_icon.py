@@ -34,36 +34,38 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def build() -> None:
-    img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+def render_tile(size: int, radius: int, bg=BG, fg=FG) -> Image.Image:
+    """Draw the MDown glyph — an "M" over a down-chevron — on a rounded tile.
+
+    Reused by the launcher icon (rounded, transparent corners) and the Play
+    store assets (a full square). The glyph stays inside the centre ~66% so
+    Android's adaptive-icon mask never clips it. Sizes scale from `size` so a
+    single design renders crisply at any resolution.
+    """
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=bg)
 
-    # Full-bleed rounded tile (legacy icon); adaptive mask crops the corners.
-    draw.rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=180, fill=BG)
-
-    # Centered "M" monogram, kept within the adaptive safe zone.
-    font = _font(560)
+    font = _font(int(size * 0.547))
     tb = draw.textbbox((0, 0), "M", font=font)
     tw, th = tb[2] - tb[0], tb[3] - tb[1]
     draw.text(
-        ((SIZE - tw) / 2 - tb[0], SIZE * 0.40 - th / 2 - tb[1]),
-        "M",
-        font=font,
-        fill=FG,
+        ((size - tw) / 2 - tb[0], size * 0.40 - th / 2 - tb[1]),
+        "M", font=font, fill=fg,
     )
 
-    # Down-chevron beneath the M: the "convert to Markdown / down" cue.
-    cx, cy = SIZE / 2, SIZE * 0.72
-    w, h, t = 190, 92, 46
+    cx, cy = size / 2, size * 0.72
+    w, h, t = size * 0.185, size * 0.09, size * 0.045
     draw.line(
         [(cx - w / 2, cy - h / 2), (cx, cy + h / 2), (cx + w / 2, cy - h / 2)],
-        fill=FG,
-        width=t,
-        joint="curve",
+        fill=fg, width=int(t), joint="curve",
     )
+    return img
 
+
+def build() -> None:
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    img.save(OUT)
+    render_tile(SIZE, radius=180).save(OUT)
     print(f"wrote {OUT} ({SIZE}x{SIZE})")
 
 
