@@ -148,6 +148,7 @@ class Engine:
             # leave them untouched.
             if Path(path).suffix.lower() == ".pdf":
                 markdown = _postprocess_pdf_markdown(markdown)
+                markdown = _insert_risk_tables(markdown, path)
             return ConversionResult(
                 source=path,
                 markdown=markdown,
@@ -319,6 +320,37 @@ def _postprocess_pdf_markdown(md: str) -> str:
         out.append(_maybe_heading(ln))
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(out))
     return text.strip() + "\n"
+
+
+_RISK_SECTION_HEADING = re.compile(r"^#{1,6}\s+(4\.\d+)\b")
+
+
+def _insert_risk_tables(md: str, pdf_path: str) -> str:
+    """Replace the garbled body under each risk-register subsection heading
+    (## 4.1, ## 4.2, ## 4.3) with a clean Markdown table rebuilt from the PDF's
+    text geometry. Only runs when the reconstruction validates against the raw
+    text; otherwise the markdown is returned unchanged (see pdf_tables)."""
+    from .pdf_tables import reconstruct_risk_tables
+
+    tables = reconstruct_risk_tables(pdf_path)
+    if not tables:
+        return md
+
+    lines = md.splitlines()
+    out: List[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        m = _RISK_SECTION_HEADING.match(line)
+        if m and m.group(1) in tables:
+            out.extend([line, "", tables[m.group(1)], ""])
+            i += 1
+            while i < n and not lines[i].lstrip().startswith("#"):
+                i += 1  # drop the garbled body up to the next heading
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out).rstrip() + "\n"
 
 
 def _friendly_error(exc: Exception) -> str:
