@@ -39,6 +39,24 @@ def test_rewrite_leaves_no_remnant(tmp_path):
     assert text.count("dependencies = [") == 1
 
 
+def test_parse_args_target_and_forwarded_flags():
+    # Explicit target is split off; everything else forwards to `flet build`.
+    assert build_android.parse_args(["aab", "--verbose"]) == ("aab", ["--verbose"])
+    assert build_android.parse_args(["apk"]) == ("apk", [])
+    # Signing/version flags are forwarded verbatim after the target.
+    target, extra = build_android.parse_args(
+        ["aab", "--build-number", "7", "--android-signing-key-alias", "upload"]
+    )
+    assert target == "aab"
+    assert extra == ["--build-number", "7", "--android-signing-key-alias", "upload"]
+
+
+def test_parse_args_defaults_to_apk_without_target():
+    # Backward compatibility: no leading target -> apk, flags untouched.
+    assert build_android.parse_args(["--verbose"]) == ("apk", ["--verbose"])
+    assert build_android.parse_args([]) == ("apk", [])
+
+
 def test_pyproject_parses_with_legacy_toml_semantics():
     # flet's CLI uses the old `toml` package, which chokes on quotes and
     # apostrophes in comments inside arrays. Guard: no comment lines

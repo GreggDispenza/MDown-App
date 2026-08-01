@@ -3,7 +3,9 @@ name: Build installables
 # Produces the end-user deliverables as workflow artifacts:
 #   - mdown-windows            (zipped portable Windows app, run mdown_app.exe)
 #   - mdown-windows-installer  (MDown-Setup.exe: installs + shortcuts + uninstaller)
-#   - mdown-android            (APK)
+#   - mdown-android            (APK, for sideloading / QA)
+#   - mdown-android-aab        (AAB, the Google Play upload artifact; release-
+#                               signed when the ANDROID_* secrets are set)
 # Runs automatically on every code push (docs-only pushes are skipped),
 # on demand, and on version tags.
 
@@ -138,7 +140,7 @@ jobs:
           path: installer/MDown-Setup.exe
 
   android:
-    name: Android (.apk)
+    name: Android (.apk + .aab)
     runs-on: ubuntu-latest # Android SDK/NDK preinstalled on this image
     steps:
       - uses: actions/checkout@v4
@@ -154,19 +156,102 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: pip install flet==${{ env.FLET_VERSION }}
-      - name: Build APK (full deps, then pure-Python fallback)
-        # Path A: default build — works if Flet's wheel index carries the
-        # native deps (onnxruntime et al.) for Android.
-        # Path B: scripts/build_android.py — pure-Python dependency set
-        # with the local magika stand-in. See docs/BUILDING.md.
+
+      - name: Read app version
+        id: ver
+        # versionName comes from pyproject; versionCode is the monotonic CI
+        # run number so every upload to Play has a unique, increasing code.
         run: |
-          flet build apk --verbose || python scripts/build_android.py --verbose
-      - name: Collect APK
+          v="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "App version $v, build number ${{ github.run_number }}"
+
+      - name: Prepare Android signing (optional)
+        id: signing
+        # The release keystore lives only in CI secrets. When they are absent
+        # (before the keystore is generated) the build proceeds UNSIGNED so CI
+        # stays green — that artifact is fine for sideloading but Play will
+        # reject it. Populate the four ANDROID_* secrets to get a release
+        # bundle you can upload. See docs/BUILDING.md.
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing keystore decoded."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret set — building UNSIGNED (not uploadable to Google Play). Add the ANDROID_* signing secrets to produce a release bundle."
+          fi
+
+      - name: Build APK (sideload) and AAB (Play), with pure-Python fallback
+        # Path A: default `flet build` — works if Flet's wheel index carries
+        # the native deps (onnxruntime et al.) for Android.
+        # Path B: scripts/build_android.py — pure-Python dependency set with
+        # the local magika stand-in. See docs/BUILDING.md.
+        # Signing/version flags are shared across both targets; when signing
+        # is unavailable the `sign` array is empty and the build is unsigned.
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -o pipefail
+          common=(--verbose
+                  --build-number "$BUILD_NUMBER"
+                  --build-version "$BUILD_VERSION"
+                  --android-adaptive-icon-background "#4F46E5")
+          sign=()
+          if [ "$SIGNING_AVAILABLE" = "true" ]; then
+            sign=(--android-signing-key-store "$KEYSTORE_PATH"
+                  --android-signing-key-store-password "$KEYSTORE_PASSWORD"
+                  --android-signing-key-password "$KEY_PASSWORD"
+                  --android-signing-key-alias "$KEY_ALIAS")
+          fi
+          build() {  # $1 = apk|aab — Path A (full deps) then Path B (pure-Python)
+            flet build "$1" "${common[@]}" "${sign[@]}" \
+              || python scripts/build_android.py "$1" "${common[@]}" "${sign[@]}"
+          }
+          build aab || { echo "::error::AAB build failed (both full-deps and pure-Python paths)"; exit 1; }
+          build apk || { echo "::error::APK build failed (both full-deps and pure-Python paths)"; exit 1; }
+
+      - name: Inspect generated AndroidManifest (permissions audit)
+        # Surface the manifest in the log so any dangerous storage permission
+        # (e.g. MANAGE_EXTERNAL_STORAGE) that would trigger Play policy review
+        # is visible on every build. Best-effort: never fails the job.
+        if: always()
+        run: |
+          # Path A writes under ./build; Path B (build_android.py) builds in a
+          # mdown-android-* temp dir. Search both, best-effort.
+          roots="build"
+          for d in "${RUNNER_TEMP:-/tmp}"/mdown-android-* /tmp/mdown-android-*; do
+            [ -d "$d" ] && roots="$roots $d"
+          done
+          found=""
+          for m in $(find $roots -name AndroidManifest.xml -path '*main*' 2>/dev/null); do
+            found=1
+            echo "== $m =="
+            grep -iE 'uses-permission|<application' "$m" || true
+          done
+          [ -n "$found" ] || echo "AndroidManifest.xml not found (build may have failed earlier)"
+
+      - name: Collect artifacts
         run: |
           mkdir -p out
-          find build/apk dist/android -name '*.apk' -exec cp {} out/ \; 2>/dev/null || true
+          find build/aab build/apk dist/android \( -name '*.aab' -o -name '*.apk' \) \
+            -exec cp {} out/ \; 2>/dev/null || true
           ls -l out/
-          test -n "$(ls out/*.apk 2>/dev/null)"
+          test -n "$(ls out/*.aab 2>/dev/null)" # AAB is the Play deliverable
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mdown-android-aab
+          path: out/*.aab
       - uses: actions/upload-artifact@v4
         with:
           name: mdown-android

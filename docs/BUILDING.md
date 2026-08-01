@@ -74,8 +74,66 @@ otherwise identical, and the UI automatically greys out formats whose
 converters aren't present. The APK lands in `dist/android/`.
 
 Install on a device: `adb install dist/android/*.apk` (enable "install
-from unknown sources"), or distribute via Play with your own signing setup
-(`flet build apk` supports `--android-signing-key-store` etc.).
+from unknown sources").
+
+## Publishing to Google Play (signed AAB)
+
+Google Play requires a **release-signed App Bundle (`.aab`)**, not an APK.
+Both `flet build` and `scripts/build_android.py` accept `aab` as the target:
+
+```bash
+flet build aab                       # or: python scripts/build_android.py aab
+```
+
+### One-time: create an upload keystore
+
+Keep this file forever — losing it means you can no longer update the app.
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+```
+
+### Sign a local build
+
+```bash
+flet build aab \
+  --android-signing-key-store upload-keystore.jks \
+  --android-signing-key-store-password "$KS_PW" \
+  --android-signing-key-password "$KEY_PW" \
+  --android-signing-key-alias upload \
+  --build-number 1 --build-version 0.1.0
+```
+
+`--build-number` is the integer **versionCode** (must increase on every
+upload); `--build-version` is the **versionName**. Enrol the app in **Play
+App Signing**: you upload signed with this *upload* key and Google re-signs
+with the managed *app signing* key.
+
+### CI signing (GitHub Actions)
+
+The `android` job in `.github/workflows/build.yml` builds both an `.apk`
+(sideload/QA) and an `.aab` (Play), and signs them when these repository
+**secrets** are present — otherwise it builds unsigned and prints a warning,
+so CI stays green before the keystore exists:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_B64` | `base64 -w0 upload-keystore.jks` output |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_PASSWORD` | key password |
+| `ANDROID_KEY_ALIAS` | `upload` |
+
+The versionCode is the CI run number (`github.run_number`), so every build
+is uniquely, monotonically numbered. Artifacts: `mdown-android-aab` (upload
+this to Play) and `mdown-android` (APK for sideloading).
+
+### App icon
+
+`assets/icon.png` (1024×1024) is the launcher icon; `flet build` derives
+every Android density and the adaptive-icon foreground from it. Regenerate
+it with `python scripts/make_icon.py`. The CI build passes a matching
+`--android-adaptive-icon-background`.
 
 ## Version pins, deliberately
 

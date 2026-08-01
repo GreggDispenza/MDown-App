@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the Android APK with the pure-Python dependency set.
+"""Build the Android APK or AAB with the pure-Python dependency set.
 
-Use this when the default `flet build apk` fails because pip cannot
+Use this when the default `flet build apk`/`aab` fails because pip cannot
 resolve native dependencies (onnxruntime, pulled in by magika) for the
 Android target. It:
 
@@ -10,10 +10,11 @@ Android target. It:
 2. rewrites the copy's [project] dependencies to the pure-Python set from
    requirements-android.txt, substituting our local magika stand-in
    (packaging/magika-stub) for the real magika;
-3. runs `flet build apk` there and reports where the APK landed.
+3. runs `flet build <target>` there and reports where the artifact landed.
 
 Prerequisites: Flutter SDK + Android toolchain on PATH (see
-docs/BUILDING.md). Run from anywhere:  python scripts/build_android.py
+docs/BUILDING.md). Run from anywhere:
+    python scripts/build_android.py [apk|aab] [extra flet flags...]
 """
 
 from __future__ import annotations
@@ -59,27 +60,45 @@ def rewrite_pyproject(build_dir: Path) -> None:
     pyproject.write_text(text)
 
 
+TARGETS = {"apk", "aab"}
+
+
+def parse_args(argv: list[str]) -> tuple[str, list[str]]:
+    """Split argv into (target, extra flet flags).
+
+    Usage:  build_android.py [apk|aab] [extra `flet build` flags...]
+    The target is optional and defaults to apk for backward compatibility;
+    anything else (e.g. --verbose, --android-signing-*) is forwarded verbatim
+    to `flet build`.
+    """
+    if argv and argv[0] in TARGETS:
+        return argv[0], argv[1:]
+    return "apk", argv
+
+
 def main() -> None:
+    target, extra = parse_args(sys.argv[1:])
+
     build_root = Path(tempfile.mkdtemp(prefix="mdown-android-"))
     build_dir = build_root / "app"
     shutil.copytree(
         REPO, build_dir, ignore=lambda d, names: [n for n in names if n in EXCLUDE]
     )
     rewrite_pyproject(build_dir)
-    print(f"Building in {build_dir} (original project untouched)")
+    print(f"Building {target} in {build_dir} (original project untouched)")
 
     result = subprocess.run(
-        ["flet", "build", "apk", *sys.argv[1:]], cwd=build_dir
+        ["flet", "build", target, *extra], cwd=build_dir
     )
     if result.returncode != 0:
         sys.exit(result.returncode)
 
-    apk_dir = build_dir / "build" / "apk"
+    artifact_dir = build_dir / "build" / target
     out = REPO / "dist" / "android"
     out.mkdir(parents=True, exist_ok=True)
-    for apk in apk_dir.glob("*.apk"):
-        shutil.copy2(apk, out / apk.name)
-        print(f"APK: {out / apk.name}")
+    for artifact in artifact_dir.glob(f"*.{target}"):
+        shutil.copy2(artifact, out / artifact.name)
+        print(f"{target.upper()}: {out / artifact.name}")
 
 
 if __name__ == "__main__":
