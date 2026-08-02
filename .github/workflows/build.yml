@@ -348,6 +348,9 @@ jobs:
     # emulator's logcat/screenshots are artifacts the environment can't fetch.
     needs: android
     runs-on: ubuntu-latest
+    # Backstop: the emulator + probe should finish well under this. Without it a
+    # stalled adb call would otherwise burn GitHub's 360-minute default.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Download built APK

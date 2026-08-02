@@ -27,44 +27,45 @@ done
 PKG="$(printf '%s\n' "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
 ACT="$(printf '%s\n' "$badging" | sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p" | head -1)"
 
-adb wait-for-device
+timeout 120 adb wait-for-device || true
 for _ in $(seq 1 60); do
-  [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+  [ "$(timeout 20 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
   sleep 2
 done
-adb logcat -c || true
+timeout 20 adb logcat -c || true
 
-# The app self-tests on Android and writes a verdict to its own INTERNAL storage
-# (the only place a release/untrusted_app can reliably write). Become root on the
-# google_apis emulator so we can read that app-private file back.
-adb root >/dev/null 2>&1 || true
-adb wait-for-device
-
-install_out="$(adb install -r "$apk" 2>&1 | tail -3)"
+install_out="$(timeout 180 adb install -r "$apk" 2>&1 | tail -3)"
 if [ -n "$PKG" ] && [ -n "$ACT" ]; then
-  amstart_out="$(adb shell am start -W -n "$PKG/$ACT" 2>&1 | tail -4)"
+  amstart_out="$(timeout 60 adb shell am start -W -n "$PKG/$ACT" 2>&1 | tail -4)"
 elif [ -n "$PKG" ]; then
-  amstart_out="$(adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tail -4)"
+  amstart_out="$(timeout 60 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tail -4)"
 else
   amstart_out="(no package discovered from APK)"
 fi
 
 read_result() {  # echo the self-test verdict line from the app's internal dir (needs root)
-  adb shell "cat \$(find /data/data/$PKG -name mdown_selftest.txt 2>/dev/null | head -1) 2>/dev/null" \
+  timeout 20 adb shell "cat \$(find /data/data/$PKG -name mdown_selftest.txt 2>/dev/null | head -1) 2>/dev/null" \
     2>/dev/null | tr -d '\r' | grep -m1 MDOWN_SELFTEST
 }
+
+# Become root to read the app-private verdict file. This restarts adbd, so bound
+# it AND the reconnect with `timeout` (never block the job) and let the retry
+# loop below absorb the brief disconnect — do it after launch so install/start
+# ran over the stable connection. Harmless if the image refuses root.
+timeout 30 adb root >/dev/null 2>&1 || true
+timeout 60 adb wait-for-device || true
 
 # Poll up to ~120s — serious_python unpacks the interpreter, then self-tests.
 pid=""; signal=""; result=""
 for _ in $(seq 1 40); do
   sleep 3
-  [ -n "$PKG" ] && pid="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r')"
-  signal="$(adb logcat -d 2>/dev/null | grep -m1 -E "$PKG.*(python_bundle|python_site_packages|MainActivity)|Displayed.*$PKG" || true)"
+  [ -n "$PKG" ] && pid="$(timeout 20 adb shell pidof "$PKG" 2>/dev/null | tr -d '\r')"
+  signal="$(timeout 20 adb logcat -d 2>/dev/null | grep -m1 -E "$PKG.*(python_bundle|python_site_packages|MainActivity)|Displayed.*$PKG" || true)"
   [ -z "$result" ] && [ -n "$PKG" ] && result="$(read_result)"
   [ -n "$pid" ] && [ -n "$signal" ] && [ -n "$result" ] && break
 done
 
-crash="$(adb logcat -d 2>/dev/null \
+crash="$(timeout 20 adb logcat -d 2>/dev/null \
   | grep -iE "${PKG:-app.mdown}|python|flet|serious|dlopen|UnsatisfiedLink|AndroidRuntime|FATAL|E DEBUG" \
   | tail -20)"
 
