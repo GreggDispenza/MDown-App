@@ -1,19 +1,20 @@
 """On-device conversion self-test.
 
 The emulator smoke test (scripts/android_smoke.sh) proves the app *boots* on
-Android. This proves the next thing: that a real conversion runs on-device and
-produces correct Markdown. It runs a tiny CSV through the engine and records a
-verdict where the CI smoke test can read it.
+Android. This proves the next thing: that a real conversion runs there and
+produces correct Markdown. It converts a tiny CSV through the engine and writes
+a verdict (MDOWN_SELFTEST OK len=.. sha=..) that the smoke test reads back.
 
-Reporting channel: a plain print() does NOT reach logcat under serious_python,
-and flet's storage dirs are internal (not adb-readable for a release build). So
-the verdict is written to the app's *external* files directory
-(/storage/emulated/0/Android/data/<pkg>/files/), which adb can read without
-run-as. The package name is taken from /proc/self/cmdline. The result is also
-printed (it lands in flet's FLET_APP_CONSOLE log) as a fallback.
+Reporting channel: a release app is an `untrusted_app` under SELinux, so it
+cannot exec system tools, read /proc/self/cmdline, or write adb-readable
+external storage; and its stdout does not reach logcat. What it *can* always do
+is write to its own internal storage (flet exposes those dirs as
+FLET_APP_STORAGE_DATA / FLET_APP_STORAGE_TEMP). The CI emulator is a rootable
+`google_apis` image, so the smoke test reads that internal file via `adb root`.
 
-`run_selftest()` is a no-op-safe function: any failure is caught and reported
-as a FAIL verdict rather than raising, so it can never crash app startup.
+`run_selftest()` never raises — any failure becomes a FAIL verdict — so it can
+never crash app startup. `maybe_run_selftest()` runs it (off the UI thread) only
+on Android; it is a no-op on desktop and in tests.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 RESULT_FILENAME = "mdown_selftest.txt"
@@ -29,45 +31,15 @@ RESULT_FILENAME = "mdown_selftest.txt"
 _SAMPLE_CSV = "name,qty\napples,3\npears,5\n"
 
 
-def selftest_requested() -> bool:
-    """True only when the CI smoke test asked for it via an Android system
-    property (`setprop debug.mdown_selftest 1`). Real users never set it, and
-    getprop does not exist off-Android, so this is a no-op in production and on
-    desktop."""
-    try:
-        import subprocess
-
-        out = subprocess.run(
-            ["getprop", "debug.mdown_selftest"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return out.stdout.strip() == "1"
-    except Exception:
-        return False
-
-
-def _android_package() -> str:
-    try:
-        return Path("/proc/self/cmdline").read_bytes().split(b"\0", 1)[0].decode() or ""
-    except Exception:
-        return ""
-
-
 def _result_paths() -> list[Path]:
-    """Where to write the verdict, most-external (adb-readable) first."""
+    """App-private locations to write the verdict, in preference order."""
     paths: list[Path] = []
-    pkg = _android_package()
-    # The external files dir is only meaningful (and only adb-readable) on
-    # Android; flet sets FLET_PLATFORM=android there. Guarding on it also keeps
-    # the desktop/test path off the /storage/emulated tree.
-    if pkg and os.environ.get("FLET_PLATFORM") == "android":
-        paths.append(Path(f"/storage/emulated/0/Android/data/{pkg}/files/{RESULT_FILENAME}"))
-    temp = os.environ.get("FLET_APP_STORAGE_TEMP")
-    if temp:
-        paths.append(Path(temp) / RESULT_FILENAME)
-    data = os.environ.get("FLET_APP_STORAGE_DATA")
-    if data:
-        paths.append(Path(data) / RESULT_FILENAME)
+    for env in ("FLET_APP_STORAGE_DATA", "FLET_APP_STORAGE_TEMP"):
+        value = os.environ.get(env)
+        if value:
+            paths.append(Path(value) / RESULT_FILENAME)
+    if not paths:  # desktop / tests
+        paths.append(Path(tempfile.gettempdir()) / RESULT_FILENAME)
     return paths
 
 
@@ -101,6 +73,13 @@ def run_selftest() -> str:
         except Exception:
             continue
     return verdict
+
+
+def maybe_run_selftest() -> None:
+    """On Android, run the self-test off the UI thread so it never delays first
+    paint; a no-op everywhere else. flet sets FLET_PLATFORM=android on-device."""
+    if os.environ.get("FLET_PLATFORM") == "android":
+        threading.Thread(target=run_selftest, name="mdown-selftest", daemon=True).start()
 
 
 if __name__ == "__main__":

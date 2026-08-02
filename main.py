@@ -2,14 +2,12 @@
 
 import flet as ft
 
-# On-device conversion self-test. Runs ONLY when the CI emulator smoke test
-# requests it via a system property (never for real users, never on desktop);
-# it converts a sample and records a verdict the smoke test reads back. See
-# mdown_app/selftest.py and scripts/android_smoke.sh.
-from mdown_app.selftest import run_selftest, selftest_requested
+# On-device conversion self-test: on Android only, convert a sample off the UI
+# thread and record a verdict the CI emulator smoke test reads back (see
+# mdown_app/selftest.py and scripts/android_smoke.sh). No-op on desktop.
+from mdown_app.selftest import maybe_run_selftest
 from mdown_app.ui import main
 
-if selftest_requested():
-    run_selftest()
+maybe_run_selftest()
 
 ft.app(target=main)

@@ -34,8 +34,11 @@ for _ in $(seq 1 60); do
 done
 adb logcat -c || true
 
-# Ask the app to run its on-device conversion self-test at startup.
-adb shell setprop debug.mdown_selftest 1 || true
+# The app self-tests on Android and writes a verdict to its own INTERNAL storage
+# (the only place a release/untrusted_app can reliably write). Become root on the
+# google_apis emulator so we can read that app-private file back.
+adb root >/dev/null 2>&1 || true
+adb wait-for-device
 
 install_out="$(adb install -r "$apk" 2>&1 | tail -3)"
 if [ -n "$PKG" ] && [ -n "$ACT" ]; then
@@ -46,12 +49,9 @@ else
   amstart_out="(no package discovered from APK)"
 fi
 
-read_result() {  # echo the self-test verdict line, trying adb-readable locations
-  local p="/storage/emulated/0/Android/data/$PKG/files/mdown_selftest.txt" out
-  out="$(adb shell "cat '$p'" 2>/dev/null | tr -d '\r' | grep -m1 MDOWN_SELFTEST)"
-  [ -n "$out" ] && { echo "$out"; return; }
-  out="$(adb exec-out run-as "$PKG" cat files/mdown_selftest.txt 2>/dev/null | tr -d '\r' | grep -m1 MDOWN_SELFTEST)"
-  [ -n "$out" ] && { echo "$out"; return; }
+read_result() {  # echo the self-test verdict line from the app's internal dir (needs root)
+  adb shell "cat \$(find /data/data/$PKG -name mdown_selftest.txt 2>/dev/null | head -1) 2>/dev/null" \
+    2>/dev/null | tr -d '\r' | grep -m1 MDOWN_SELFTEST
 }
 
 # Poll up to ~120s — serious_python unpacks the interpreter, then self-tests.
