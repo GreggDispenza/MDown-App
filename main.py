@@ -2,12 +2,14 @@
 
 import flet as ft
 
+# On-device conversion self-test. Runs ONLY when the CI emulator smoke test
+# requests it via a system property (never for real users, never on desktop);
+# it converts a sample and records a verdict the smoke test reads back. See
+# mdown_app/selftest.py and scripts/android_smoke.sh.
+from mdown_app.selftest import run_selftest, selftest_requested
 from mdown_app.ui import main
 
-# On-device boot marker. serious_python routes stdout to Android logcat, so the
-# CI emulator smoke test (scripts/android_smoke.sh) can confirm the Python
-# runtime started AND the full import chain (flet + mdown_app + markitdown)
-# loaded on Android by matching this line. Harmless everywhere else.
-print("MDOWN_BOOT_PROBE", flush=True)
+if selftest_requested():
+    run_selftest()
 
 ft.app(target=main)
