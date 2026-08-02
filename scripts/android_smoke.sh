@@ -44,12 +44,18 @@ else
 fi
 
 # Poll up to ~90s — serious_python unpacks the interpreter on first launch.
-pid=""; marker=""
+# The gate is that the app process is alive AND logcat shows our app's Python
+# runtime executing or its UI rendered (the launched activity). A plain Python
+# print() does NOT reach logcat under serious_python in a release build, so a
+# stdout marker is captured only for information, never required.
+pid=""; signal=""; marker=""
 for _ in $(seq 1 30); do
   sleep 3
   [ -n "$PKG" ] && pid="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r')"
-  marker="$(adb logcat -d 2>/dev/null | grep -m1 'MDOWN_BOOT_PROBE' || true)"
-  [ -n "$pid" ] && [ -n "$marker" ] && break
+  lc="$(adb logcat -d 2>/dev/null)"
+  signal="$(printf '%s\n' "$lc" | grep -m1 -E "$PKG.*(python_bundle|python_site_packages|MainActivity)|Displayed.*$PKG" || true)"
+  marker="$(printf '%s\n' "$lc" | grep -m1 'MDOWN_BOOT_PROBE' || true)"
+  [ -n "$pid" ] && [ -n "$signal" ] && break
 done
 
 crash="$(adb logcat -d 2>/dev/null \
@@ -60,20 +66,21 @@ reason="OK"
 if [ -z "$apk" ]; then reason="no APK under apk/"
 elif [ -z "$PKG" ]; then reason="could not read package name from APK (aapt badging failed)"
 elif [ -z "$pid" ]; then reason="app process not alive after launch (startup crash?)"
-elif [ -z "$marker" ]; then reason="boot marker not in logcat (Python did not reach startup, or stdout not routed)"
+elif [ -z "$signal" ]; then reason="no evidence of the app's Python/UI running in logcat"
 fi
 
 echo "================ SMOKE SUMMARY ================"
-echo "apk       = $apk"
-echo "abis      = ${abis:-<none>}"
-echo "package   = ${PKG:-<unknown>}"
-echo "activity  = ${ACT:-<unknown>}"
-echo "install   : $install_out"
-echo "am start  : $amstart_out"
-echo "pid       = '$pid'"
-echo "marker    = '$marker'"
+echo "apk          = $apk"
+echo "abis         = ${abis:-<none>}"
+echo "package      = ${PKG:-<unknown>}"
+echo "activity     = ${ACT:-<unknown>}"
+echo "install      : $install_out"
+echo "am start     : $amstart_out"
+echo "pid          = '$pid'"
+echo "alive signal = '$signal'"
+echo "stdout marker= '${marker:-<not routed to logcat>}'"
 echo "---- relevant logcat (tail) ----"
 echo "${crash:-<no matching logcat lines>}"
-echo "RESULT    : $reason"
+echo "RESULT       : $reason"
 [ "$reason" = "OK" ] || { echo "::error::smoke failed: $reason"; exit 1; }
-echo "SMOKE PASS: app booted and the Python runtime ran (package $PKG)"
+echo "SMOKE PASS: app booted on Android — process alive (pid $pid), Python/UI running"
