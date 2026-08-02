@@ -84,8 +84,12 @@ From `docs/play-store-listing.md`:
 
 ## 7. Release flow
 
-- [ ] Cut a version: bump `version` in `pyproject.toml`, commit, tag `vX.Y.Z`,
-      push the tag → CI builds a signed AAB (versionCode = run number)
+See [release-guide.md](release-guide.md) for the one-command release helper
+and a tester-recruitment email template.
+
+- [ ] Cut a version: `python scripts/release.py patch --push` (bumps
+      `pyproject.toml`, commits, tags `vX.Y.Z`, pushes) → CI builds a signed
+      AAB (versionCode = run number)
 - [ ] **Internal testing** → install on your own device, sanity check
 - [ ] **Closed testing** → run the 14-day period if on a personal account
 - [ ] **Production** → submit for review (first review can take days), then
