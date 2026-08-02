@@ -47,6 +47,14 @@ access. **Organization** accounts skip this.
       `ANDROID_KEY_ALIAS` (`upload`)
 - [ ] In Play Console, enrol the app in **Play App Signing** (default) — you
       upload with the upload key; Google manages the app signing key.
+- [ ] Confirm the built AAB targets **API 35** (Flutter 3.27's default, so
+      normally automatic) and requests no dangerous storage permission — both
+      are printed by the build's manifest-audit step. A too-low target API is
+      a hard Play rejection.
+
+> The CI signing steps assume an ephemeral GitHub-hosted runner. Do **not**
+> run this workflow on a shared self-hosted runner: the decoded keystore lives
+> in `RUNNER_TEMP` during the build, which can persist across jobs there.
 
 ## 5. CI auto-upload (Cluster F — optional but recommended)
 

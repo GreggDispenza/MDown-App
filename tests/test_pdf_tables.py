@@ -7,13 +7,13 @@ the two-column layout, plus the engine splice with a stubbed reconstructor.
 
 import mdown_app.engine as engine
 from mdown_app.pdf_tables import (
-    _Cell,
     _build_rows,
+    _Cell,
     _column_edges,
     _split_straddle,
     _validate,
-    render_tables,
     reconstruct_risk_tables,
+    render_tables,
 )
 
 # Column left edges: item numbers cluster with the issue text at ~117.
@@ -140,6 +140,36 @@ def test_render_tables_escapes_pipes():
 
 def test_reconstruct_returns_none_on_missing_file():
     assert reconstruct_risk_tables("/no/such/file.pdf") is None
+
+
+def test_validate_rejects_hollow_row():
+    # A row whose issue was absorbed by a neighbour (empty issue) is a mis-split
+    # the word-multiset check can't see; the per-row guard must reject it.
+    rows, words = _good_rows()
+    rows[0].issue = ""
+    assert _validate(rows, words) is False
+
+
+def test_split_straddle_ignores_narrow_gap():
+    # A 2-3 space gap is intra-sentence, not a column gutter: keep the line whole
+    # so a wide issue-only line is never wrongly split into issue|recommendation.
+    assert _split_straddle("Cracks at   ceiling edge") == ("Cracks at ceiling edge", "")
+
+
+def test_ordinary_internal_text_is_not_a_subgroup():
+    # An issue line beginning "Internal" without a dash must stay in its own row,
+    # not be relocated as a bold group header above the next row.
+    records = [
+        ("4.2", _cell(2, 92, "1  Internal partition damaged", x1=290)),
+        ("4.2", _cell(2, 303, "Repair it", x1=470)),
+        ("4.2", _cell(4, 518, "L", x1=527)),
+        ("4.2", _cell(60, 92, "2  Second issue", x1=290)),
+        ("4.2", _cell(60, 303, "Second rec", x1=470)),
+        ("4.2", _cell(64, 518, "L", x1=527)),
+    ]
+    rows = _build_rows(records, EDGES)
+    assert rows[0].issue == "Internal partition damaged"
+    assert rows[0].subgroup == "" and rows[1].subgroup == ""
 
 
 # ---- engine splice --------------------------------------------------------

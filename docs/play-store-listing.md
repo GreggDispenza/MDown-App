@@ -32,7 +32,7 @@ SUPPORTED FORMATS
 • Excel (.xlsx) and CSV
 • PDF
 • HTML web pages
-• Images and other common document types
+• EPUB, JSON, XML, Jupyter notebooks and more
 
 WHY MDOWN
 • On-device conversion — your files never leave your phone.

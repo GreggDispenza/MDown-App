@@ -315,8 +315,8 @@ def _postprocess_pdf_markdown(md: str) -> str:
             continue
         if _strip_leading_page_number(ln) in boilerplate:
             continue  # running header/footer
-        if re.fullmatch(r"\d{1,4}", stripped):
-            continue  # standalone page number
+        if re.fullmatch(r"\d{1,3}", stripped):
+            continue  # standalone page number (<=3 digits; keeps 4-digit years)
         out.append(_maybe_heading(ln))
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(out))
     return text.strip() + "\n"

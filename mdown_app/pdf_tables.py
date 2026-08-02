@@ -19,11 +19,22 @@ those tables from the geometry:
   anchor reclaims the out-dented opening line from the row above it.
 
 Every step is defensive. `reconstruct_risk_tables` returns ``None`` unless the
-result passes strict validation (consecutive numbering, a valid L/M/H level on
-every row, and — the key invariant — not a single word gained or lost versus
-the raw extracted text). A caller can therefore splice the clean tables in when
-a value comes back and otherwise leave MarkItDown's output untouched, so no
-other document is ever put at risk by this heuristic.
+result passes validation (consecutive numbering, a valid L/M/H level on every
+row, a non-empty issue on every row, and no word gained or lost versus the raw
+extracted text). When any check fails — or the geometry does not match this
+family of report at all — it returns ``None`` and the caller leaves
+MarkItDown's output untouched.
+
+Scope of the guarantee, honestly: the word-multiset check catches content that
+is *dropped or gained*, and the layout heuristics are tuned so that a
+structural mismatch degrades to that no-op rather than a wrong table. What the
+multiset check does NOT catch is content *reassigned* between rows or columns
+while the overall word set stays equal. The per-row guards (non-empty issue;
+strict subgroup and gutter detection) close the reassignment cases seen in
+practice, but a sibling report with materially different geometry could in
+principle still produce a mis-split table that validates. This runs only on
+reports matching the detected structure; treat it as a strong heuristic, not a
+proof of correctness.
 """
 
 from __future__ import annotations
@@ -38,8 +49,11 @@ _SECTION_RE = re.compile(r"^(4\.\d+)\b")
 # Column-header cell labels; their presence on a page marks it as a table page.
 _HEADER_LABELS = {"Item", "no.", "Issue / Risk", "Recommendation", "Risk", "Level"}
 _REQUIRED_HEADER = {"Issue / Risk", "Recommendation"}
-# Organisational sub-labels that group rows within a table ("Internal – ...").
-_SUBGROUP_PREFIXES = ("Internal", "External")
+# Organisational sub-labels that group rows within a table: exactly "External",
+# or "Internal" followed by a dash ("Internal – Back of House"). Matched
+# strictly so ordinary issue text starting with these words (e.g. "Internal
+# partition damaged") is NOT mistaken for a group header and relocated.
+_SUBGROUP_RE = re.compile(r"^External$|^Internal\s*[–—-]")
 # Running header/footer text to ignore inside a table region.
 _NOISE_MARKERS = ("Confidential",)
 _NOISE_PREFIXES = ("Project number:",)
@@ -175,8 +189,14 @@ def _gather_table_lines(pdf_path: str):
 
 
 def _split_straddle(raw: str) -> Tuple[str, str]:
-    """Split a physical line that holds both columns at its widest gutter."""
-    gaps = [(len(mo.group()), mo.start(), mo.end()) for mo in re.finditer(r"\s{2,}", raw)]
+    """Split a physical line that holds both columns at its widest gutter.
+
+    Only a run of 4+ spaces counts as a column gutter: pdfminer renders the
+    inter-column gap as many spaces, whereas ordinary intra-sentence spacing is
+    one or two. Requiring a wide gap avoids wrongly splitting a wide issue-only
+    line that happens to contain a double space. If no such gutter exists the
+    line is left whole (all issue), never guessed."""
+    gaps = [(len(mo.group()), mo.start(), mo.end()) for mo in re.finditer(r"\s{4,}", raw)]
     if not gaps:
         return _norm(raw), ""
     _, start, end = max(gaps)
@@ -195,7 +215,7 @@ def _classify(row: _Row, split_ir: float, split_rr: float, l_rec: float) -> None
         text = _norm(cell.text)
         if text.startswith("Photo"):
             cols["photo"].append((cell.yg, cell.x0, text))
-        elif text.split()[0] in _SUBGROUP_PREFIXES and cell.x0 < split_ir:
+        elif cell.x0 < split_ir and _SUBGROUP_RE.match(text):
             cols["subgroup"].append((cell.yg, cell.x0, text))
         elif cell.x0 >= split_rr:
             cols["risk"].append((cell.yg, cell.x0, text))
@@ -268,11 +288,19 @@ def _build_rows(records, edges) -> List[_Row]:
 
 
 def _validate(rows: List[_Row], source_words) -> bool:
+    """Reject an implausible reconstruction. See the module docstring for the
+    limits of this guard — notably it cannot see words shuffled *between* rows
+    or columns, only words dropped or gained overall."""
     if not rows:
         return False
     if [r.no for r in rows] != list(range(1, len(rows) + 1)):
         return False
     if any(r.risk not in _VALID_RISK for r in rows):
+        return False
+    # Every risk item has an issue description; an empty issue cell means rows
+    # were mis-split (a hollowed row, its content absorbed by a neighbour), so
+    # discard the whole reconstruction rather than emit a corrupted table.
+    if any(not row.issue.strip() for row in rows):
         return False
     out_words: "collections.Counter[str]" = collections.Counter()
     for row in rows:

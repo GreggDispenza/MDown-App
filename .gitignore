@@ -9,3 +9,10 @@ dist/
 .pytest_cache/
 .ruff_cache/
 storage/
+
+# Android/Play signing material — never commit these
+*.jks
+*.keystore
+*.p12
+*.pem
+*service-account*.json

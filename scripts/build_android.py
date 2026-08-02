@@ -96,9 +96,15 @@ def main() -> None:
     artifact_dir = build_dir / "build" / target
     out = REPO / "dist" / "android"
     out.mkdir(parents=True, exist_ok=True)
-    for artifact in artifact_dir.glob(f"*.{target}"):
+    # rglob (not glob): copy the artifact even if a flet version nests it a
+    # level deeper, so a successful build never yields an empty dist/android.
+    copied = 0
+    for artifact in artifact_dir.rglob(f"*.{target}"):
         shutil.copy2(artifact, out / artifact.name)
         print(f"{target.upper()}: {out / artifact.name}")
+        copied += 1
+    if copied == 0:
+        sys.exit(f"error: flet build {target} succeeded but no .{target} found under {artifact_dir}")
 
 
 if __name__ == "__main__":

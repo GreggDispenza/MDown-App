@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@9a48871cbeff8679f6337339dc79b806ad9a9a13 # v2.9.1
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
@@ -151,7 +151,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@9a48871cbeff8679f6337339dc79b806ad9a9a13 # v2.9.1
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
@@ -164,7 +164,7 @@ jobs:
         run: |
           v="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "App version $v, build number ${{ github.run_number }}"
+          echo "App version $v, build number ${{ github.run_number * 100 + github.run_attempt }}"
 
       - name: Prepare Android signing (optional)
         id: signing
@@ -178,6 +178,7 @@ jobs:
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+            chmod 600 "$RUNNER_TEMP/upload-keystore.jks"
             echo "available=true" >> "$GITHUB_OUTPUT"
             echo "Release signing keystore decoded."
           else
@@ -198,7 +199,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
-          BUILD_NUMBER: ${{ github.run_number }}
+          # versionCode must strictly increase and be unique per Play upload.
+          # run_number alone is NOT re-run-safe (a re-run keeps the same
+          # number); fold in run_attempt so re-running a release still bumps it.
+          BUILD_NUMBER: ${{ github.run_number * 100 + github.run_attempt }}
           BUILD_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -o pipefail
@@ -266,21 +270,34 @@ jobs:
         env:
           PLAY_SA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
+          TAG: ${{ github.ref_name }}
         run: |
-          if [ -n "$PLAY_SA" ] && [ "$SIGNING_AVAILABLE" = "true" ]; then
+          # Require a strict semver tag (vX.Y.Z) as a backstop — the `v*` push
+          # filter would also match ad-hoc tags like `v-test` or `vendor`.
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$PLAY_SA" ] && [ "$SIGNING_AVAILABLE" = "true" ]; then
             echo "upload=true" >> "$GITHUB_OUTPUT"
           else
             echo "upload=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Play upload skipped — needs a v* tag, a signed build (ANDROID_* secrets), and PLAY_SERVICE_ACCOUNT_JSON."
+            echo "::warning::Play upload skipped — needs a vX.Y.Z tag, a signed build (ANDROID_* secrets), and PLAY_SERVICE_ACCOUNT_JSON."
           fi
 
       - name: Upload AAB to Google Play (internal track)
         if: steps.play.outputs.upload == 'true'
-        # Pin to a full SHA in production for supply-chain safety.
-        uses: r0adkll/upload-google-play@v1
+        # Pinned to a full commit SHA (this step receives the Play service
+        # account). Update the SHA and the trailing version together.
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: app.mdown.mdown # verify == generated applicationId
           releaseFiles: out/*.aab
           track: internal
           status: completed
+
+      - name: Clean up signing keystore
+        # Always remove the decoded keystore, even on failure. Harmless on
+        # GitHub-hosted runners (the VM is discarded) but essential if this
+        # ever runs on a self-hosted runner, where RUNNER_TEMP can persist.
+        if: always()
+        run: |
+          shred -u "$RUNNER_TEMP/upload-keystore.jks" 2>/dev/null \
+            || rm -f "$RUNNER_TEMP/upload-keystore.jks" || true
