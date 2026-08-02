@@ -255,6 +255,41 @@ jobs:
           ls -l out/
           test -n "$(ls out/*.aab 2>/dev/null)" # AAB is the Play deliverable
 
+      - name: Inspect built APK (activity, target SDK, permissions)
+        # Recon: surface the ground-truth Android facts later verification steps
+        # depend on — the launchable activity, target/min SDK, and the real
+        # permission set — from the built APK via aapt/aapt2. Written to a small
+        # file (uploaded below) so the facts survive log truncation. Best-effort:
+        # never fails the build; the aapt tool is located under the SDK (newest
+        # build-tools) rather than hard-coded to a version.
+        if: always()
+        run: |
+          f=out/apk-facts.txt; mkdir -p out; : > "$f"
+          apk="$(ls out/*.apk 2>/dev/null | head -1)"
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          aapt2="$(find "$sdk/build-tools" -name aapt2 2>/dev/null | sort -V | tail -1)"
+          aapt="$(find "$sdk/build-tools" -name aapt 2>/dev/null | sort -V | tail -1)"
+          { echo "apk=$apk"; echo "aapt2=$aapt2"; echo "aapt=$aapt"; } >> "$f"
+          if [ -n "$apk" ]; then
+            badging=""
+            for t in "$aapt2" "$aapt"; do
+              [ -n "$t" ] || continue
+              badging="$("$t" dump badging "$apk" 2>/dev/null)" && [ -n "$badging" ] && break || true
+            done
+            echo "$badging" \
+              | grep -iE "^package:|application-label:|launchable-activity:|(target)?[sS]dkVersion|uses-permission" \
+              >> "$f" || echo "(no badging output)" >> "$f"
+          else
+            echo "(no APK found)" >> "$f"
+          fi
+          echo "=== apk-facts.txt ==="; cat "$f"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mdown-apk-facts
+          path: out/apk-facts.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: mdown-android-aab
