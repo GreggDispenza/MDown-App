@@ -29,8 +29,11 @@ flet run                  # desktop window
 python -m pytest tests/   # test suite
 ```
 
-Building the Windows .exe and the Android .apk:
-**[docs/BUILDING.md](docs/BUILDING.md)**.
+Building the Windows .exe and the Android .apk/.aab:
+**[docs/BUILDING.md](docs/BUILDING.md)**. Cutting a release
+(`python scripts/release.py patch --push`) and publishing to Google Play:
+**[docs/release-guide.md](docs/release-guide.md)** and the
+**[Play release checklist](docs/play-release-checklist.md)**.
 
 ## Using the app
 
@@ -45,11 +48,14 @@ Building the Windows .exe and the Android .apk:
 
 | Path | What it is |
 |---|---|
-| `main.py`, `mdown_app/` | the app — `ui.py` (Flet UI) and `engine.py` (MarkItDown wrapper) |
+| `main.py`, `mdown_app/` | the app — `ui.py` (Flet UI), `engine.py` (MarkItDown wrapper), `pdf_tables.py` (risk-register table reconstruction) |
 | `packaging/magika-stub/` | pure-Python magika stand-in enabling Android builds (never publish to PyPI) |
-| `scripts/build_android.py` | APK build with the pure-Python dependency set |
+| `scripts/build_android.py` | APK/AAB build with the pure-Python dependency set |
+| `scripts/release.py` | one-command version bump + tag to cut a release |
+| `scripts/make_icon.py`, `make_store_assets.py` | regenerate the launcher icon and Play store graphics |
+| `assets/` | launcher icon (`icon.png`) and Play store assets (`play/`) |
 | `tests/` | engine + stub tests, including an Android-configuration simulation |
-| `docs/` | architecture map, build guide |
+| `docs/` | architecture, build guide, Play release checklist, store listing, privacy policy |
 
 ## License
 
