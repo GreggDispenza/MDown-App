@@ -159,12 +159,15 @@ jobs:
 
       - name: Read app version
         id: ver
-        # versionName comes from pyproject; versionCode is the monotonic CI
-        # run number so every upload to Play has a unique, increasing code.
+        # versionName comes from pyproject; versionCode is derived from the CI
+        # run number + attempt so every Play upload has a unique, increasing
+        # code (Actions expressions have no arithmetic, so compute it in shell).
         run: |
           v="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          bn=$(( GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT ))
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "App version $v, build number ${{ github.run_number * 100 + github.run_attempt }}"
+          echo "build_number=$bn" >> "$GITHUB_OUTPUT"
+          echo "App version $v, build number $bn"
 
       - name: Prepare Android signing (optional)
         id: signing
@@ -199,10 +202,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
-          # versionCode must strictly increase and be unique per Play upload.
-          # run_number alone is NOT re-run-safe (a re-run keeps the same
-          # number); fold in run_attempt so re-running a release still bumps it.
-          BUILD_NUMBER: ${{ github.run_number * 100 + github.run_attempt }}
+          # versionCode (run_number*100+run_attempt) is computed in the version
+          # step so a re-run still yields a unique, increasing code — run_number
+          # alone is not re-run-safe.
+          BUILD_NUMBER: ${{ steps.ver.outputs.build_number }}
           BUILD_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -o pipefail
