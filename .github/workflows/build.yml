@@ -169,24 +169,40 @@ jobs:
           echo "build_number=$bn" >> "$GITHUB_OUTPUT"
           echo "App version $v, build number $bn"
 
-      - name: Prepare Android signing (optional)
+      - name: Prepare Android signing (real key, else ephemeral proof key)
         id: signing
-        # The release keystore lives only in CI secrets. When they are absent
-        # (before the keystore is generated) the build proceeds UNSIGNED so CI
-        # stays green — that artifact is fine for sideloading but Play will
-        # reject it. Populate the four ANDROID_* secrets to get a release
-        # bundle you can upload. See docs/BUILDING.md.
+        # The real release keystore lives only in CI secrets. When it is absent
+        # we still sign — with a throwaway keystore generated here — so the
+        # release signing PATH (flet's --android-signing-* flags) is exercised
+        # and verified on every build, instead of shipping an untested pipeline.
+        # Two distinct outputs keep this safe:
+        #   available = a REAL upload key is present (gates the Play upload)
+        #   signed    = signing will happen at all (real OR ephemeral)
+        # so an ephemeral-signed AAB can never be uploaded to Play. Populate the
+        # four ANDROID_* secrets to sign with the real key. See docs/BUILDING.md.
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
+          ks="$RUNNER_TEMP/upload-keystore.jks"
           if [ -n "$KS_B64" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
-            chmod 600 "$RUNNER_TEMP/upload-keystore.jks"
+            echo "$KS_B64" | base64 -d > "$ks"
+            chmod 600 "$ks"
             echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "signed=true"    >> "$GITHUB_OUTPUT"
+            echo "mode=release"    >> "$GITHUB_OUTPUT"
             echo "Release signing keystore decoded."
           else
+            # Proof-only key: fixed throwaway passwords, short validity. Never
+            # leaves the runner and can't reach Play (see `available` above).
+            keytool -genkeypair -v -keystore "$ks" \
+              -alias ephemeral -keyalg RSA -keysize 2048 -validity 30 \
+              -storepass android -keypass android \
+              -dname "CN=MDown CI Ephemeral, OU=CI, O=MDown, C=US"
+            chmod 600 "$ks"
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No ANDROID_KEYSTORE_B64 secret set — building UNSIGNED (not uploadable to Google Play). Add the ANDROID_* signing secrets to produce a release bundle."
+            echo "signed=true"     >> "$GITHUB_OUTPUT"
+            echo "mode=ephemeral"  >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret set — signing with an EPHEMERAL proof key (verifies the signing path but is NOT uploadable to Google Play). Add the ANDROID_* signing secrets to sign a real release bundle."
           fi
 
       - name: Build APK (sideload) and AAB (Play), with pure-Python fallback
@@ -194,14 +210,16 @@ jobs:
         # the native deps (onnxruntime et al.) for Android.
         # Path B: scripts/build_android.py — pure-Python dependency set with
         # the local magika stand-in. See docs/BUILDING.md.
-        # Signing/version flags are shared across both targets; when signing
-        # is unavailable the `sign` array is empty and the build is unsigned.
+        # Signing/version flags are shared across both targets. The build is
+        # always signed (real key when the secrets are set, else the ephemeral
+        # proof key from the previous step).
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
+          SIGNING_SIGNED: ${{ steps.signing.outputs.signed }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
           # versionCode (run_number*100+run_attempt) is computed in the version
           # step so a re-run still yields a unique, increasing code — run_number
           # alone is not re-run-safe.
@@ -220,7 +238,11 @@ jobs:
                   --build-version "$BUILD_VERSION"
                   --android-adaptive-icon-background "#4F46E5")
           sign=()
-          if [ "$SIGNING_AVAILABLE" = "true" ]; then
+          if [ "$SIGNING_SIGNED" = "true" ]; then
+            if [ "$SIGNING_MODE" = "ephemeral" ]; then
+              # Match the throwaway keystore created in the signing step.
+              KEYSTORE_PASSWORD=android; KEY_PASSWORD=android; KEY_ALIAS=ephemeral
+            fi
             sign=(--android-signing-key-store "$KEYSTORE_PATH"
                   --android-signing-key-store-password "$KEYSTORE_PASSWORD"
                   --android-signing-key-password "$KEY_PASSWORD"
@@ -260,6 +282,24 @@ jobs:
             -exec cp {} out/ \; 2>/dev/null || true
           ls -l out/
           test -n "$(ls out/*.aab 2>/dev/null)" # AAB is the Play deliverable
+
+      - name: Verify release signing (proves the signing path end-to-end)
+        # The build is always signed (real key or the ephemeral proof key), so
+        # assert it: apksigner must confirm a valid signature. This is a HARD
+        # gate — it fails the build if the --android-signing-* flags ever
+        # silently stop taking effect, so a real release can never regress to
+        # unsigned unnoticed.
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+        run: |
+          apk="$(ls out/*.apk 2>/dev/null | head -1)"
+          [ -n "$apk" ] || { echo "::error::no APK produced to verify"; exit 1; }
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          as="$(find "$sdk/build-tools" -name apksigner 2>/dev/null | sort -V | tail -1)"
+          [ -n "$as" ] || { echo "::error::apksigner not found under the Android SDK"; exit 1; }
+          echo "Verifying $apk (mode=${SIGNING_MODE:-unknown}) with $as"
+          "$as" verify --verbose --print-certs "$apk"
+          echo "APK signature verified — the release signing path works."
 
       - name: Inspect built APK (activity, target SDK, permissions)
         # Recon: surface the ground-truth Android facts later verification steps

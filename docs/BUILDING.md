@@ -113,9 +113,13 @@ with the managed *app signing* key.
 ### CI signing (GitHub Actions)
 
 The `android` job in `.github/workflows/build.yml` builds both an `.apk`
-(sideload/QA) and an `.aab` (Play), and signs them when these repository
-**secrets** are present — otherwise it builds unsigned and prints a warning,
-so CI stays green before the keystore exists:
+(sideload/QA) and an `.aab` (Play). It signs with your **real upload key**
+when these repository **secrets** are present; when they are absent it signs
+with a throwaway **ephemeral proof key** generated in the job (and prints a
+warning) so the signing path is exercised and verified on every build — an
+`apksigner verify` step is a hard gate. An ephemeral-signed build is fine for
+sideload/QA but is **not** uploadable to Play (the Play-upload step requires the
+real `ANDROID_KEYSTORE_B64` secret). Supply these to sign a real release:
 
 | Secret | Value |
 | --- | --- |
