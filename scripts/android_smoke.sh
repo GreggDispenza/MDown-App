@@ -12,8 +12,8 @@
 # tail-truncated, so a compact SUMMARY is printed LAST.
 #
 # Package name and launchable activity are DISCOVERED from the APK via aapt
-# badging (flet's applicationId, e.g. app.mdown.mdown_app, is derived from
-# pyproject [project].name and is not obvious).
+# badging (rather than hardcoded): the applicationId is app.mdown.mdown, pinned
+# via `--project mdown` in the build workflow.
 set -uo pipefail
 
 apk="$(ls apk/*.apk 2>/dev/null | head -1)"

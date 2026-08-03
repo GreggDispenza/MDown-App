@@ -10,7 +10,7 @@ a few permanent decisions. Work top to bottom.
 
 | Decision | Current value | Notes |
 | --- | --- | --- |
-| **Application ID** | `app.mdown.mdown` | From `[tool.flet] org="app.mdown", project="mdown"`. Confirm this is final — it is the package name forever. To change it, edit `pyproject.toml` **before** the first upload. |
+| **Application ID** | `app.mdown.mdown` | `org="app.mdown"` (from `[tool.flet]`) + project `mdown`, pinned by `--project mdown` in the Android build (`.github/workflows/build.yml`). Note: flet derives the id from `[project].name`, **not** `[tool.flet] project`, so the id is pinned via the build flag — verified by the emulator smoke test, which reads the built APK's package name. Confirm this is final — it is the package name forever. To change it, edit the `--project` value **before** the first upload. |
 | **App name** | `MDown: Document to Markdown` | Editable later in the listing, but pick something you like. |
 | **Account type** | *your choice* | **Personal** vs **Organization** — this sets your timeline (see §3). |
 

@@ -30,6 +30,9 @@ packages = ["mdown_app"]
 # ---- flet build configuration (flet build windows / flet build apk) ----
 [tool.flet]
 org = "app.mdown"
+# NOTE: flet build derives the Android applicationId from [project].name, NOT
+# from this `project` key. To keep the id app.mdown.mdown (not app.mdown.mdown_app),
+# the Android build passes `--project mdown` explicitly (.github/workflows/build.yml).
 project = "mdown"
 product = "MDown"
 company = "MDown-App contributors"

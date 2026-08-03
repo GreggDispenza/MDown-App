@@ -209,7 +209,13 @@ jobs:
           BUILD_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -o pipefail
+          # --project pins the Android applicationId to app.mdown.mdown
+          # (org "app.mdown" from [tool.flet] + project "mdown"). Without it flet
+          # derives the name from [project].name ("mdown-app" -> "mdown_app"),
+          # ignoring [tool.flet] project, which would ship app.mdown.mdown_app and
+          # mismatch the Play packageName below. This is the PERMANENT app id.
           common=(--verbose
+                  --project mdown
                   --build-number "$BUILD_NUMBER"
                   --build-version "$BUILD_VERSION"
                   --android-adaptive-icon-background "#4F46E5")
