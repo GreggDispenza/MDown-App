@@ -40,11 +40,17 @@ green run means the app booted **and** converted a document on a real emulator.
 | Priority | Item | Location |
 | --- | --- | --- |
 | Medium | **"Save .md" on mobile** now prefers the app's *external* files dir (`Android/data/<pkg>/files`, reachable from the Files app, no permission) and is honest when it can only reach unreachable internal storage — but a fully robust save (share sheet / MediaStore Downloads) still needs a native plugin Flet 0.28.3 lacks. Copy works as the reliable path. Needs on-device UI verification. | `mdown_app/ui.py`, `mdown_app/storage.py` |
-| Low | The PDF guard uses **static caps** (size + declared page count). A small crafted PDF that abuses FlateDecode streams or object graphs to burn CPU/memory is not fully covered; closing that fully needs a timeout- or memory-capped parse (e.g. a worker subprocess), a larger change deferred for now. | `mdown_app/engine.py` |
-| Low | Availability chips mark some built-in formats (EPub, JSON/XML, zip, Jupyter) always-available; conversion can still fail at runtime for edge cases. | `mdown_app/engine.py` |
+| Low | The PDF guard uses **static caps** (size + declared page count). A small crafted PDF that abuses FlateDecode streams or object graphs to burn CPU/memory is not fully covered. Closing that needs a timeout-/memory-capped parse, and that is **hard on the primary target**: a release app is an `untrusted_app` under SELinux that can't spawn a worker subprocess, a background thread can't interrupt pdfminer's C-level work, and `signal.alarm` is main-thread/Unix-only while conversion runs off-thread. A desktop-only timeout would give platform-inconsistent partial safety, so it stays deferred rather than half-built. | `mdown_app/engine.py` |
 
 ## Recently addressed
 
+- **Verified the availability chips are accurate.** Confirmed every
+  "always-available" built-in format (HTML, CSV, JSON/XML, EPub, Jupyter, zip)
+  actually converts under the reduced Android dependency set
+  (`markitdown[docx,xlsx]`) — they are markitdown core converters with no missing
+  extra. "Available" means the converter is present, not a per-file success
+  guarantee; runtime failure on a malformed file is universal to every format, so
+  this is working as intended, not a chip defect.
 - **Decided the PDF risk-register reconstruction: keep and document.** It is
   tested and safely no-ops on non-matching PDFs, so it stays; the gap was that
   it was undocumented in the app's general scope. README's "Using the app" now
