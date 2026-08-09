@@ -211,3 +211,14 @@ def test_insert_risk_tables_noop_when_reconstruction_fails(monkeypatch):
         "mdown_app.pdf_tables.reconstruct_risk_tables", lambda p: None
     )
     assert engine._insert_risk_tables(md, "dummy.pdf") == md
+
+
+def test_insert_risk_tables_skips_reparse_without_section_heading(monkeypatch):
+    # Ordinary PDF with no "4.x" heading: the expensive geometry re-parse must
+    # not run at all (returns the markdown unchanged without touching the PDF).
+    def _boom(_):
+        raise AssertionError("reconstruct_risk_tables should not be called")
+
+    monkeypatch.setattr("mdown_app.pdf_tables.reconstruct_risk_tables", _boom)
+    md = "# Invoice\n\nAmount due: 42.00\n\n## Terms\nNet 30.\n"
+    assert engine._insert_risk_tables(md, "dummy.pdf") == md

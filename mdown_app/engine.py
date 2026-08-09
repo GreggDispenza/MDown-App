@@ -203,8 +203,11 @@ def _guard_archive_bomb(path: str, _depth: int = 0) -> None:
     """Reject archives whose central directory declares an implausible
     expansion, before MarkItDown decompresses anything into memory.
 
-    Reads only the zip central directory (member metadata), never the
-    compressed data, so the check itself is cheap and bomb-proof.
+    The size/ratio checks read only the zip central directory (member
+    metadata), never the compressed data, so they are cheap and bomb-proof. A
+    nested archive is the one exception: to inspect its own central directory we
+    read that member into memory — but only after its declared uncompressed size
+    has passed the cumulative-total guard, so the read is bounded, not a bomb.
     """
     if Path(path).suffix.lower() not in _ZIP_BASED_EXTENSIONS:
         return
@@ -330,6 +333,13 @@ def _insert_risk_tables(md: str, pdf_path: str) -> str:
     (## 4.1, ## 4.2, ## 4.3) with a clean Markdown table rebuilt from the PDF's
     text geometry. Only runs when the reconstruction validates against the raw
     text; otherwise the markdown is returned unchanged (see pdf_tables)."""
+    # Cheap gate first: reconstruct_risk_tables re-parses the entire PDF
+    # geometry, so skip that second parse unless the converted markdown even has
+    # a "4.x" section heading to splice a table into. Ordinary PDFs (the common
+    # case) have none and avoid paying for a parse whose result is never used.
+    if not any(_RISK_SECTION_HEADING.match(ln) for ln in md.splitlines()):
+        return md
+
     from .pdf_tables import reconstruct_risk_tables
 
     tables = reconstruct_risk_tables(pdf_path)
