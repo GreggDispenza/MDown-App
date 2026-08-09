@@ -39,7 +39,7 @@ green run means the app booted **and** converted a document on a real emulator.
 
 | Priority | Item | Location |
 | --- | --- | --- |
-| High | **"Save .md" on mobile** writes to app-private internal storage the user can't reach; needs a share intent / SAF picker / Downloads. Copy-to-clipboard works as a stopgap. | `mdown_app/ui.py` |
+| Medium | **"Save .md" on mobile** now prefers the app's *external* files dir (`Android/data/<pkg>/files`, reachable from the Files app, no permission) and is honest when it can only reach unreachable internal storage — but a fully robust save (share sheet / MediaStore Downloads) still needs a native plugin Flet 0.28.3 lacks. Copy works as the reliable path. Needs on-device UI verification. | `mdown_app/ui.py`, `mdown_app/storage.py` |
 | Medium | The **PDF risk-register table reconstruction** is tuned to one report family (dotted `4.x` sections, `L/M/H` levels). It is a strong heuristic that safely no-ops on other PDFs, but it is undocumented in the app's stated general scope — decide whether to keep-and-document or remove. | `mdown_app/pdf_tables.py` |
 | Low | The PDF guard uses **static caps** (size + declared page count). A small crafted PDF that abuses FlateDecode streams or object graphs to burn CPU/memory is not fully covered; closing that fully needs a timeout- or memory-capped parse (e.g. a worker subprocess), a larger change deferred for now. | `mdown_app/engine.py` |
 | Low | Availability chips mark some built-in formats (EPub, JSON/XML, zip, Jupyter) always-available; conversion can still fail at runtime for edge cases. | `mdown_app/engine.py` |

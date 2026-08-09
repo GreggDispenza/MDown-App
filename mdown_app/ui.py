@@ -14,6 +14,7 @@ from typing import List, Optional
 import flet as ft
 
 from .engine import ConversionResult, Engine
+from .storage import pick_mobile_save_dir
 
 
 class MDownApp:
@@ -268,12 +269,26 @@ class MDownApp:
         if not (self.current and self.current.ok):
             return
         if self.page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
-            # No native save dialog on mobile: write into the app's storage
-            # area (exposed by Flet via FLET_APP_STORAGE_DATA) and say where.
-            base = os.environ.get("FLET_APP_STORAGE_DATA") or str(Path.home())
+            # No usable native save dialog on mobile (Flet 0.28.3's save_file
+            # can't write through SAF). Prefer the app's external files dir,
+            # which a file manager can open, over unreachable internal storage;
+            # be honest when we can only reach the latter.
+            internal = os.environ.get("FLET_APP_STORAGE_DATA") or str(Path.home())
+            base, reachable = pick_mobile_save_dir(internal)
             target = Path(base) / self._default_md_name()
-            target.write_text(self.current.markdown, encoding="utf-8")
-            self._toast(f"Saved to {target}")
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(self.current.markdown, encoding="utf-8")
+            except OSError as exc:
+                self._toast(f"Couldn't save the file ({exc}). Use Copy instead.")
+                return
+            if reachable:
+                self._toast(f"Saved to {target}")
+            else:
+                self._toast(
+                    "Saved, but only inside the app's private storage, which a "
+                    "file manager can't open. Use Copy to get the Markdown out."
+                )
         else:
             self.save_dialog.save_file(
                 dialog_title="Save Markdown",
