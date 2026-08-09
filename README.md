@@ -41,8 +41,26 @@ Building the Windows .exe and the Android .apk/.aab:
    formats supported on your device).
 2. Read the result in the **Preview** tab, or grab the source from the
    **Markdown** tab.
-3. **Copy** to clipboard, or **Save .md** (file dialog on Windows; app
-   storage on Android).
+3. **Copy** to clipboard, or **Save .md** (a file dialog on Windows; on
+   Android, the app's external files folder when reachable, otherwise
+   app-private storage — Copy is the reliable path there).
+
+### PDF handling
+
+PDF text extraction is inherently lossy, so MDown does two extra things for
+PDFs beyond a plain conversion:
+
+- **Structure clean-up** — numbered section titles (`4.1 …`) become Markdown
+  headings, and repeated running headers/footers and standalone page numbers
+  are dropped, so the output reads as navigable Markdown rather than a flat text
+  dump.
+- **Risk-register tables** — survey/inspection reports whose `4.x` sections hold
+  a multi-column risk register (Issue / Recommendation / Level) get those tables
+  rebuilt from the PDF's text geometry into real Markdown tables, since plain
+  extraction interleaves the columns. This is a **best-effort enhancement for
+  that report family**: it runs only when the document has such sections, and it
+  safely falls back to the ordinary conversion whenever the reconstruction
+  doesn't validate (see `mdown_app/pdf_tables.py`). Other PDFs are unaffected.
 
 ## Repository layout
 

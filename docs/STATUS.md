@@ -40,12 +40,16 @@ green run means the app booted **and** converted a document on a real emulator.
 | Priority | Item | Location |
 | --- | --- | --- |
 | Medium | **"Save .md" on mobile** now prefers the app's *external* files dir (`Android/data/<pkg>/files`, reachable from the Files app, no permission) and is honest when it can only reach unreachable internal storage — but a fully robust save (share sheet / MediaStore Downloads) still needs a native plugin Flet 0.28.3 lacks. Copy works as the reliable path. Needs on-device UI verification. | `mdown_app/ui.py`, `mdown_app/storage.py` |
-| Medium | The **PDF risk-register table reconstruction** is tuned to one report family (dotted `4.x` sections, `L/M/H` levels). It is a strong heuristic that safely no-ops on other PDFs, but it is undocumented in the app's stated general scope — decide whether to keep-and-document or remove. | `mdown_app/pdf_tables.py` |
 | Low | The PDF guard uses **static caps** (size + declared page count). A small crafted PDF that abuses FlateDecode streams or object graphs to burn CPU/memory is not fully covered; closing that fully needs a timeout- or memory-capped parse (e.g. a worker subprocess), a larger change deferred for now. | `mdown_app/engine.py` |
 | Low | Availability chips mark some built-in formats (EPub, JSON/XML, zip, Jupyter) always-available; conversion can still fail at runtime for edge cases. | `mdown_app/engine.py` |
 
 ## Recently addressed
 
+- **Decided the PDF risk-register reconstruction: keep and document.** It is
+  tested and safely no-ops on non-matching PDFs, so it stays; the gap was that
+  it was undocumented in the app's general scope. README's "Using the app" now
+  has a **PDF handling** section describing both the structure clean-up and the
+  best-effort risk-register tables (and their safe fallback).
 - Added a **PDF resource-exhaustion guard** (`_guard_pdf`): rejects an oversized
   file (>200 MB) or an absurd declared page count (>10,000) before pdfminer
   parses it, closing the denial-of-service gap that the archive bomb-guard never
