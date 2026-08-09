@@ -139,6 +139,7 @@ class Engine:
         started = time.monotonic()
         try:
             _guard_archive_bomb(path)
+            _guard_pdf(path)
             result = self._md.convert(path)
             markdown = result.markdown
             # MarkItDown's PDF path emits flat text: no heading markup, and
@@ -247,6 +248,74 @@ def _guard_zipinfos(infos, zf: zipfile.ZipFile, depth: int) -> None:
             if zipfile.is_zipfile(nested):
                 with zipfile.ZipFile(nested) as nzf:
                     _guard_zipinfos(nzf.infolist(), nzf, depth + 1)
+
+
+# ---- PDF resource-exhaustion guard ----------------------------------------
+# PDFs are not zip containers, so the archive-bomb guard never sees them, yet a
+# malicious or pathological PDF is its own denial-of-service vector: pdfminer
+# builds an in-memory object model and extracts every page's text, and the app
+# may parse a PDF twice (once for markdown, once to rebuild risk tables). A file
+# that is enormous on disk, or that declares a preposterous page count, can hang
+# or OOM the process — hardest on a phone's limited per-app memory.
+#
+# We reject two cheaply-measured extremes before parsing: oversized input (a
+# stat() call) and an absurd declared page count (read straight from the page
+# tree's /Count, without walking the pages). Both bound how much work pdfminer
+# is asked to do. These are static caps, not a full sandbox: a small file that
+# weaponises FlateDecode streams or crafted object graphs to burn CPU is not
+# fully covered here — defeating that needs a timeout/memory-capped parse, which
+# is a larger change. The caps are generous enough that real documents (even
+# large scanned reports) pass untouched.
+_MAX_PDF_BYTES = 200 * 1024 * 1024  # 200 MB on disk
+_MAX_PDF_PAGES = 10_000  # declared pages in the page tree
+
+
+class PdfBombError(Exception):
+    """Raised when a PDF's size or declared page count looks abusive."""
+
+
+def _pdf_page_count(path: str) -> Optional[int]:
+    """Return the PDF's declared page count from the page tree's /Count, or
+    None if it can't be read cheaply (encrypted, malformed, not a real PDF).
+
+    This reads only the catalog and the /Pages dictionary — it does not walk or
+    render the individual pages — so it stays cheap even when /Count is huge.
+    """
+    try:
+        from pdfminer.pdfdocument import PDFDocument
+        from pdfminer.pdfparser import PDFParser
+        from pdfminer.pdftypes import resolve1
+
+        with open(path, "rb") as fh:
+            doc = PDFDocument(PDFParser(fh))
+            pages = resolve1(doc.catalog["Pages"])
+            count = resolve1(pages.get("Count"))
+        if isinstance(count, int) and count >= 0:
+            return count
+    except Exception:
+        return None
+    return None
+
+
+def _guard_pdf(path: str) -> None:
+    """Reject a PDF whose on-disk size or declared page count is implausibly
+    large, before pdfminer parses it. No-op for non-PDF inputs."""
+    if Path(path).suffix.lower() != ".pdf":
+        return
+    try:
+        size = Path(path).stat().st_size
+    except OSError:
+        return  # let MarkItDown surface the real file error
+    if size > _MAX_PDF_BYTES:
+        raise PdfBombError(
+            f"the file is {size // (1024 * 1024)} MB, over the "
+            f"{_MAX_PDF_BYTES // (1024 * 1024)} MB limit"
+        )
+    pages = _pdf_page_count(path)
+    if pages is not None and pages > _MAX_PDF_PAGES:
+        raise PdfBombError(
+            f"it declares {pages} pages, over the {_MAX_PDF_PAGES} limit"
+        )
 
 
 # ---- PDF markdown tidy-up -------------------------------------------------
@@ -369,6 +438,11 @@ def _friendly_error(exc: Exception) -> str:
         return (
             "This file was blocked for safety: it looks like a "
             f"decompression bomb ({exc}). It wasn't converted."
+        )
+    if isinstance(exc, PdfBombError):
+        return (
+            "This PDF was blocked for safety: "
+            f"{exc}. It wasn't converted."
         )
     text = str(exc).strip()
     if "UnsupportedFormatException" in type(exc).__name__ or "not supported" in text:
